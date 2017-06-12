@@ -1,0 +1,32 @@
+
+Description
+-----------
+
+A set of python routines which implement a data transfer pipeline for STAR data reconstruction on NERSC Cori. 
+The implementation is based on a model in which the data mover & disk management are done on the local site, 
+pulling and probing the remote site for data and information.  The remote site has a transfer buffer into 
+which a target and marker file pair are placed.  The existance of the marker file triggers a pull from the 
+local site to its buffer.  Success causes a transfer status file at the local site to be set as 'done'.  
+The remote site queries for the 'done' file from which it cleans its transfer buffer.  
+The local site queries the remote transfer buffer and deletes 'done' transfer status files once 
+the marker file is removed from the remote buffer.
+
+Codes
+-----
+
+transfer_pipeline.py
+
+Queries remove buffer, copies new files to local buffer via globus-url-copy, creates transfer status file
+
+clean_pipe.py
+
+1) Queries remote transfer buffer and cleans local status files when remote marker file is gone
+2) Queries remote transfer status and cleans local buffer when transfer "done" is found
+
+process_commands.py
+
+Helper routines used by both for logging and processing commands in a way that allows 
+one to break on timeouts.  This is particularly useful for remote calls via globus-url-copy 
+that can hang with network issues.
+
+
