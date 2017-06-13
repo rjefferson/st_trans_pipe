@@ -100,7 +100,7 @@ class transfer_pipeline:
     def local_space(self):
         gbs=0
         cmd="du -s %s" % (self.trans_dir)
-        s, o, e, = self.proc_c.comm(cmd,shell=True,ignore_dry_run=True)
+        s, o, e = self.proc_c.comm(cmd,shell=True,ignore_dry_run=True)
         if s == 0:
             mitems = o.split()
             gbs = BUFFERSIZE - (int(mitems[0]))/(1024*1024)
