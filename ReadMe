@@ -16,7 +16,7 @@ Codes
 
 transfer_pipeline.py
 
-Queries remove buffer, copies new files to local buffer via globus-url-copy, creates transfer status file
+Queries remote buffer, copies new files to local buffer via globus-url-copy, creates transfer status file
 
 Run as:  transfer_pipeline.py [--config-file config_file_name] [ many other options in code ]
 
