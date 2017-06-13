@@ -43,6 +43,7 @@ from subprocess import Popen, PIPE, STDOUT
 import argparse
 from ConfigParser import RawConfigParser
 from process_commands import process_commands
+import json
 
 #-------------------
 # Global defaults
@@ -348,6 +349,7 @@ def main():
 
     p = argparse.ArgumentParser(description=desc, epilog="None")
 
+#----- main arguments for transfer targets, destination, and control
     p.add_argument("--remote-url",dest="remote_url",default=REMOTE_URL,help="gsiftp url of the remote endpoint")
     p.add_argument("--local-url",dest="local_url",default=LOCAL_URL,help="gsiftp url of the remote endpoint")
     p.add_argument("--remote-dir",dest="remote_dir",default=REMOTE_DIR,help="remote directory data is pulled from")
@@ -356,20 +358,18 @@ def main():
     p.add_argument("--file-type",dest="ftype",default=FTYPE,help="file extention of data files to be transfered")
     p.add_argument("--marker-type",dest="mtype",default=MRKTYPE,help="file extention of the marker file to be transfered")
     p.add_argument("--copy-done",dest="copy_done_to_remote",action="store_true", default=False,help="Allows on to copy done file to the remote site")
+    p.add_argument("--config-file",dest="config_file",default="None",help="override any configs via a json config file")
 
 
+#------- arguments for debuging and others
     p.add_argument("--guc-parallel", dest="guc_parallel", default=GUC_PARALLEL, 
                     help="parallelism to use in globus-url-copy (-p arg) [%default]")
     p.add_argument("-n", "--dry-run", action="store_true", dest="dry_run", default=False,
                     help="display but don't run data movement commands")
-
     p.add_argument("-v", "--verbose", action="count", dest="verbosity", default=0,
                                  help="be verbose about actions, repeatable")
-
     p.add_argument("-q", "--quiet", action="store_true", dest="quiet", default=False,
                     help="be quiet, suppress normal and verbose output")
-    
-    
     p.add_argument("--hard-timeout", dest="hard_timeout",
                        default=HARD_TIMEOUT, help="the absolute timeout for "
                        "a single data transfer command, in seconds [%default]. "
@@ -381,6 +381,22 @@ def main():
                        "timeout used will be " + str(MIN_TIMEOUT) + "secs")
 
     args = p.parse_args()
+
+#-------- parse config file to override input and defaults
+    val=vars(args)
+    if not args.config_file == "None":
+        try:
+            with open(args.config_file) as config_file:
+                configs=json.load(config_file)
+            for key in configs:
+                if key in val:
+                    if isinstance(configs[key],unicode):
+                        val[key]=configs[key].encode("ascii")
+                    else:
+                        val[key]=configs[key]
+        except:
+            p.error(" Could not open or parse the configfile ")
+            return -1
 
     if args.quiet:
         args.verbosity = -1

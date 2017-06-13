@@ -2,14 +2,14 @@
 Description
 -----------
 
-A set of python routines which implement a data transfer pipeline for STAR data reconstruction on NERSC Cori. 
-The implementation is based on a model in which the data mover & disk management are done on the local site, 
-pulling and probing the remote site for data and information.  The remote site has a transfer buffer into 
-which a target and marker file pair are placed.  The existance of the marker file triggers a pull from the 
-local site to its buffer.  Success causes a transfer status file at the local site to be set as 'done'.  
-The remote site queries for the 'done' file from which it cleans its transfer buffer.  
-The local site queries the remote transfer buffer and deletes 'done' transfer status files once 
-the marker file is removed from the remote buffer.
+A set of python routines which implements a transfer pipeline for STAR data reco on NERSC Cori. 
+The agreed upon model is one in which the data mover & disk management are on the local site, 
+pulling and probing the remote site for data & info.  The remote site has a transfer buffer in 
+which a target+marker file pair are placed.  Finding the marker file triggers a pull from the 
+remote site to local buffer (see transer_pipeline.py).  Success causes a local transfer status 
+file to be set as 'done'.  For clean up (see clean_pipe.py) the remote site queries for the 'done' 
+file from which it cleans its transfer buffer.  The local site also queries the remote transfer 
+buffer and deletes 'done' status files once the marker file is removed from the remote buffer.
 
 Codes
 -----
@@ -18,7 +18,11 @@ transfer_pipeline.py
 
 Queries remove buffer, copies new files to local buffer via globus-url-copy, creates transfer status file
 
+Run as:  transfer_pipeline.py [--config-file config_file_name] [ many other options in code ]
+
 clean_pipe.py
+
+Run as:  clean_pipe.py [--config-file config_file_name] [many other options]
 
 1) Queries remote transfer buffer and cleans local status files when remote marker file is gone
 2) Queries remote transfer status and cleans local buffer when transfer "done" is found
@@ -29,4 +33,7 @@ Helper routines used by both for logging and processing commands in a way that a
 one to break on timeouts.  This is particularly useful for remote calls via globus-url-copy 
 that can hang with network issues.
 
+config_file_example.dat
+
+simple example for overwriting arguments (defaults or cli inputs) using a config file. 
 

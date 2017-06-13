@@ -30,13 +30,14 @@ from subprocess import Popen, PIPE, STDOUT
 import argparse
 from ConfigParser import RawConfigParser
 from process_commands import process_commands
+import json
 
 #---- Gobal defaults ---- Can be overwritten with commandline arguments 
 
 REMOTE_URL = "gsiftp://stargrid02.rcf.bnl.gov/"
 LOCAL_URL = "gsiftp://starreco@dtn06.nersc.gov/"
 REMOTE_DIR = "/star/data97/GRID/Cori/"
-REMOTE_STATUS = "/star/data97/GRID/status"
+REMOTE_STATUS = "/star/data97/GRID/status/"
 TRANSFER_DIR = "/global/cscratch1/sd/starreco/data/raw/buffer/"
 TRANSFER_STATUS_DIR = "/global/cscratch1/sd/starreco/data/raw/trans_status/"
 LOCAL_BUFFER = "/global/cscratch1/sd/starreco/data/reco/buffer/"
@@ -65,22 +66,6 @@ class pipecleaner:
         self.clean_local_status = args.clean_local_status
         self.clean_local_buffer = args.clean_local_buffer
         self.proc_c = process_commands(args.verbosity)
-
-
-#    def log(self, msg, verbosity=1):
-#                """ print message as is if verbosity level is exceeded """
-#
-#        if self.args.verbosity < verbosity:
-#            return
-#
-#        indent = " " * (verbosity + self._logIndent)    
-#        if isinstance(msg, str):
-#            print indent + msg
-#        elif isinstance(msg, commException):
-#            print indent + str(msg)
-#        else:
-#            pprint.pprint(msg, depth=6)
-#
 
 #-----------------------------------
     def check_proxy(self):
@@ -112,7 +97,6 @@ class pipecleaner:
                     retlist.append(afile)
         return retlist
 
-
     def nextLocalFile(self,ldir,ltype):
         self.proc_c.log("will search in  %s for %s" % (ldir,ltype),1)
         for root, dirs, files in os.walk(ldir):
@@ -120,26 +104,26 @@ class pipecleaner:
                 if xfile.endswith(ltype):
                     yield xfile
 
-    def getLocalFileList(self,ldir,lype):
+    def getLocalFileList(self,ldir,ltype):
         retlist = []
         for root, dirs, files in os.walk(ldir):
-            if afile in files:
+            for afile in files:
                 if afile.endswith(ltype):
                     retlist.append(afile)
         return retlist
 
-
     def go(self):
 
         while True:
-            icount=0
-            failed=0
             if not self.check_proxy():
                 self.proc_c.log("No valid proxy at Time=%s" % datetime.now(),0)
                 time.sleep(360)
                 continue
 
+# clean local status, removes files if remote target file IS NOT in remote transfer dir
             if self.clean_local_status:
+                icount=0
+                ifailed=0
                 self.proc_c.log("getting remote file list from %s" % (self.remote_dir),1)
                 remote_list = self.getRemoteFileList(self.remote_dir,self.ftype)
                 for tfile in self.nextLocalFile(self.trans_status,self.done):
@@ -155,27 +139,32 @@ class pipecleaner:
                             self.proc_c.log("removing file # %d  %s" % (icount,tfile),0)
                             os.remove("/".join([self.trans_status,tfile]))
                         except:
-                            failed+=0
+                            ifailed+=0
                             self.proc_c.log("remove failed %s" % (tfile),0)
-            self.proc_c.log("\n ------- \n Removed %d Files with %d OS errors \n ------- \n" % (icount,failed),0)
+                self.proc_c.log("\n ------- \n Removed %d Status Files with %d OS errors \n ------- \n" % (icount,ifailed),0)
 
+
+# clean local buffer, removes files if remote done file IS found in remote status dir
             if self.clean_local_buffer:
+                icount=0
+                ifailed=0
                 local_list = self.getLocalFileList(self.local_buffer,self.ftype)
                 for tfile in self.nextRemoteFile(self.remote_status,self.done):
                     for rfile in local_list:
                         if tfile == ".".join([rfile, self.done]):
                             try:
-                                remove_file="/".join([self.trans_source,self.ftype])
-                         #       os.remove()
-                         #       os.remove(".".join([remove_file,self.mtype]))
+                                remove_file="/".join([self.local_buffer,rfile])
+                                remove_mfile=".".join([remove_file,self.mtype])
+                                self.proc_c.log("Will remove files %s and %s" % (remove_file,remove_mfile),1)
+                                os.remove(remove_file)
+                                os.remove(remove_mfile)
+                                icount+=1
                             except:
-                                self.proc_c.log("remove failed %s" % (tfile),0)
-                            iskip = True
+                                ifailed+=1
+                                self.proc_c.log("remove failed %s" % (rfile),0)
                             break
-                iskip=False
+                self.proc_c.log("\n ------- \n Removed %d Transfer Files with %d OS errors \n ------- \n" % (icount,ifailed),0)
             time.sleep(360)
-
-
 
 
 def main():
@@ -193,15 +182,34 @@ def main():
     p.add_argument("--file-type",dest="ftype",default=FTYPE,help="file extention of data files to be transfered")
     p.add_argument("--marker-type",dest="mtype",default=MRKTYPE,help="file extention of the marker file to be transfered")
     p.add_argument("-v", "--verbose", action="count", dest="verbosity", default=0,                                                                                                 help="be verbose about actions, repeatable")
-    
+    p.add_argument("--config-file",dest="config_file",default="None",help="override any configs via a json config file")
+
     p.add_argument("--clean-local-status", action="store_true", dest="clean_local_status", default=False,
                     help="Clean up local status files after remote buffer has been cleaned")
     p.add_argument("--clean-local-buffer", action="store_true", dest="clean_local_buffer", default=False,
                     help="Clean up local buffer after files have been pulled")
 
 
-
     args = p.parse_args()
+
+#-------- parse config file to override input and defaults
+    val=vars(args)
+    if not args.config_file == "None":
+        try:
+            print "opening ", args.config_file
+            with open(args.config_file) as config_file:
+                configs=json.load(config_file)
+            for key in configs:
+                print "Thekey is ", key
+                if key in val:
+                    print "evaluating key ",key
+                    if isinstance(configs[key],unicode):
+                        val[key]=configs[key].encode("ascii")
+                    else:
+                        val[key]=configs[key]
+        except:
+            p.error(" Could not open or parse the configfile ")
+            return -1
 
     try:
         pc = pipecleaner(args)
