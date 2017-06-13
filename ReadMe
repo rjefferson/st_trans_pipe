@@ -7,9 +7,10 @@ The agreed upon model is one in which the data mover & disk management are on th
 pulling and probing the remote site for data & info.  The remote site has a transfer buffer in 
 which a target+marker file pair are placed.  Finding the marker file triggers a pull from the 
 remote site to local buffer (see transer_pipeline.py).  Success causes a local transfer status 
-file to be set as 'done'.  For clean up (see clean_pipe.py) the remote site queries for the 'done' 
-file from which it cleans its transfer buffer.  The local site also queries the remote transfer 
-buffer and deletes 'done' status files once the marker file is removed from the remote buffer.
+file to be set as 'done'. For clean up (see clean_pipe.py), the local site queries the remote transfer 
+buffer and deletes its 'done' status files once the marker file is removed from the remote buffer. 
+The remote site is also queried for the reversed transfers 'done' status files in order to remove
+files from the local site's transfer buffer. 
 
 Codes
 -----
