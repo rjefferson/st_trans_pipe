@@ -42,6 +42,12 @@ TRANSFER_DIR = "/global/cscratch1/sd/starreco/data/raw/buffer/"
 TRANSFER_STATUS_DIR = "/global/cscratch1/sd/starreco/data/raw/trans_status/"
 LOCAL_BUFFER = "/global/cscratch1/sd/starreco/data/reco/buffer/"
 
+STATE_FILE = "clean_pipe.state"
+TIME_TO_NOTIFY = 86400
+PROC_NAME = "clean_pipe"
+EMAIL_ADDR = "None"
+
+
 FTYPE = "daq"
 MRKTYPE = "mrk"
 DONETYPE="done"
@@ -63,15 +69,49 @@ class pipecleaner:
         self.ftype=args.ftype
         self.mtype=args.mtype
         self.done=DONETYPE
+
+        self.state_file=args.state_file
+        self.ltime=0
+        self.time_to_notify=args.time_to_notify
+        self.proc_name = PROC_NAME
+        self.email_addr = args.email_addr
+
         self.clean_local_status = args.clean_local_status
         self.clean_local_buffer = args.clean_local_buffer
         self.proc_c = process_commands(args.verbosity)
+
+#------------------------
+    def _unixT(self):
+        return int(time.mktime((datetime.now()).timetuple()))
 
 #-----------------------------------
     def check_proxy(self):
         """ Check for valid proxy, return True/False"""
         s, _o, _e = self.proc_c.comm("grid-proxy-info -e", shell=True,ignore_dry_run=True)
         return s == 0
+
+    def check_hold(self):
+        """ Check if paused """
+        state_file = "/".join([self.trans_status,self.state_file])
+        if not os.path.isfile(state_file):
+            self.proc_c.log("Cannot find file = %s" % (state_file),2)
+            return False
+        for aline in open(state_file):
+            if aline.split()[0] == "hold":
+                return True
+        return False
+
+#-----------------------------------
+    def notify(self):
+        self.held=self.check_hold()
+        if self.email_addr=="None":
+            return
+        mtime=self._unixT()
+        if (mtime-self.ltime) > self.time_to_notify:
+            emessage="\n".join([" : ".join(["hold",str(self.held)])," : ".join(["date",str(datetime.now())])])
+            self.proc_c.sendmail(self.proc_name,emessage,self.email_addr)
+            self.ltime=mtime
+
 
     def _remote_dirlist(self,rdir):
         cmd = "globus-url-copy -list %s" % "/".join([self.remote_url,rdir])
@@ -119,6 +159,11 @@ class pipecleaner:
                 self.proc_c.log("No valid proxy at Time=%s" % datetime.now(),0)
                 time.sleep(360)
                 continue
+            self.notify()
+            if self.held:
+                self.proc_c.log("Found Hold Request, will sleep and check again",0)
+                time.sleep(360)
+                continue
 
 # clean local status, removes files if remote target file IS NOT in remote transfer dir
             if self.clean_local_status:
@@ -139,7 +184,7 @@ class pipecleaner:
                             self.proc_c.log("removing file # %d  %s" % (icount,tfile),0)
                             os.remove("/".join([self.trans_status,tfile]))
                         except:
-                            ifailed+=0
+                            ifailed+=1
                             self.proc_c.log("remove failed %s" % (tfile),0)
                 self.proc_c.log("\n ------- \n Removed %d Status Files with %d OS errors \n ------- \n" % (icount,ifailed),0)
 
@@ -164,7 +209,7 @@ class pipecleaner:
                                 self.proc_c.log("remove failed %s" % (rfile),0)
                             break
                 self.proc_c.log("\n ------- \n Removed %d Transfer Files with %d OS errors \n ------- \n" % (icount,ifailed),0)
-            time.sleep(360)
+            time.sleep(3600)
 
 
 def main():
@@ -181,6 +226,10 @@ def main():
     p.add_argument("--remote-status",dest="remote_status",default=REMOTE_STATUS,help="remote store status of tranfers")
     p.add_argument("--file-type",dest="ftype",default=FTYPE,help="file extention of data files to be transfered")
     p.add_argument("--marker-type",dest="mtype",default=MRKTYPE,help="file extention of the marker file to be transfered")
+    p.add_argument("--state-file",dest="state_file",default=STATE_FILE,help="file for external triggers: hold ")
+    p.add_argument("--time-to-notify",dest="time_to_notify",default=TIME_TO_NOTIFY,help="how frequent to email notice")
+    p.add_argument("--email-addr",dest="email_addr",default=EMAIL_ADDR,help="destination for email notices")
+
     p.add_argument("-v", "--verbose", action="count", dest="verbosity", default=0,                                                                                                 help="be verbose about actions, repeatable")
     p.add_argument("--config-file",dest="config_file",default="None",help="override any configs via a json config file")
 

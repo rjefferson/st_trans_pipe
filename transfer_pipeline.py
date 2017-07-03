@@ -52,8 +52,14 @@ import json
 REMOTE_URL = "gsiftp://stargrid02.rcf.bnl.gov/"
 LOCAL_URL = "gsiftp://starreco@dtn06.nersc.gov/"
 REMOTE_DIR = "/star/data97/GRID/Cori/"
+REMOTE_LIST = "/star/institutions/lbl_prod/transfers/rawfilelist.txt"
 TRANSFER_DIR = "/global/cscratch1/sd/starreco/data/raw/buffer/"
 TRANSFER_STATUS_DIR = "/global/cscratch1/sd/starreco/data/raw/trans_status/"
+
+STATE_FILE = "transfer_pipeline.state"
+TIME_TO_NOTIFY = 86400
+PROC_NAME = "transfer_pipeline"
+EMAIL_ADDR = "None"
 
 FTYPE = "daq"
 MRKTYPE = "mrk"
@@ -77,6 +83,7 @@ class transfer_pipeline:
         self.args = args
         self.remote_dir=args.remote_dir
         self.remote_url=args.remote_url
+        self.remote_list= args.remote_list
         self.local_url=args.local_url
         self.trans_dir=args.trans_dir
         self.trans_status=args.trans_status
@@ -85,7 +92,14 @@ class transfer_pipeline:
         self.done=DONETYPE
         self.doing=DOINGTYPE
         self.timeout= 0
+        self.state_file=args.state_file
+        self.ltime=0
+        self.time_to_notify=args.time_to_notify
+        self.proc_name = PROC_NAME
+        self.email_addr = args.email_addr
+
         self.proc_c = process_commands(args.verbosity)
+
 #        self._logIndent = 0
         self.proc_c.log("opts: %s" % (self.args), 4)
 
@@ -95,6 +109,29 @@ class transfer_pipeline:
         """ Check for valid proxy, return True/False"""
         s, _o, _e = self.proc_c.comm("grid-proxy-info -e", shell=True,ignore_dry_run=True)
         return s == 0
+
+#-----------------------------------
+    def check_hold(self):
+        """ Check if paused """
+        state_file = "/".join([self.trans_status,self.state_file])
+        if not os.path.isfile(state_file):
+            self.proc_c.log("Cannot find file = %s" % (state_file),2)
+            return False
+        for aline in open(state_file):
+            if aline.split()[0] == "hold":
+                return True
+        return False
+
+#-----------------------------------
+    def notify(self):
+        self.held=self.check_hold()
+        if self.email_addr=="None":
+            return
+        mtime=self._unixT()
+        if (mtime-self.ltime) > self.time_to_notify:
+            emessage="\n".join([" : ".join(["hold",str(self.held)])," : ".join(["date",str(datetime.now())])])
+            self.proc_c.sendmail(self.proc_name,emessage,self.email_addr)
+            self.ltime=mtime
 
 #-----------------------------------
     def local_space(self):
@@ -120,6 +157,9 @@ class transfer_pipeline:
 
 #-----------------------------------
     def getfiles(self, rdir):
+        """ 
+            get files from remote directory via guc --list 
+        """
         cmd = "globus-url-copy -list %s" % "/".join([self.remote_url,rdir])
         self.proc_c.log(" Command:: '%s'" % (cmd), 4)
         s, o, e = self.proc_c.comm(cmd)
@@ -131,11 +171,32 @@ class transfer_pipeline:
                     yield afile  
                       
 #-----------------------------------
-    def _calc_timeout(self, size):
+    def getfiles_fromlist(self, rdir):
+        """ 
+            routine added as there was some inconsistencies when getting the dir listing via guc --list
+            Too much disk access would cause the list to fail.  Here we can make the list is in someother way and 
+            copy it from the remote destination.   Not sure we'll ever use it but it's a backup when needed
+        """
+        cmd = "globus-url-copy %s ./rawfilelist.txt" % "/".join([self.remote_url,self.remote_list])
+        self.proc_c.log(" Command:: '%s'" % (cmd), 4)
+        s, o, e = self.proc_c.comm(cmd)
+        if s == 0:
+            with open("rawfilelist.txt") as rflist:
+                mylines = rflist.readlines()
+                for aline in mylines:
+                    afile = aline.rsplit('\n')
+                    self.proc_c.log("Next file is: '%s'" % (afile),1)
+                    if afile.endswith(self.ftype) and self.checkMarkerFile(".".join([afile,self.mtype]),flist):
+                        yield afile
+            os.remove("rawfilelist.txt")
 
-        """ Calculate the timeout to be used based on the size of the
-        file to be transfered and values of hard, rate and min timeout
-        settings. """
+
+#-----------------------------------
+    def _calc_timeout(self, size):
+        """ 
+            Calculate the timeout to be used based on the size of the file to be transfered 
+            and values of hard, rate and min timeout settings. 
+        """
 
         # check for defaults
         if self.args.hard_timeout == HARD_TIMEOUT and \
@@ -164,6 +225,13 @@ class transfer_pipeline:
 
 #------------------------
     def manage_lock(self,fname,ltype,tally):
+        """
+            change lock files based on ltype input requested:
+            if 'done' then rename in_progess file to done
+            if 'doing' then create the in_progress file
+            if 'failed' then remove the in_progress file
+            catch errors
+        """
         localfile="/".join([self.trans_status,fname])
         progressfile=".".join([localfile,self.doing])
         if ltype == self.done:
@@ -309,6 +377,15 @@ class transfer_pipeline:
         while True:
             icount = 0
             myloop += 1
+
+            for key in tally:
+                tally[key]=0
+            self.notify()
+            if self.held:
+                self.proc_c.log("Found Hold Request, will sleep and check again",0)
+                time.sleep(360)
+                continue
+
             if not self.check_proxy():
                 self.proc_c.log("No valid proxy at Time=%s" % datetime.now(),0)
                 time.sleep(360)
@@ -353,10 +430,15 @@ def main():
     p.add_argument("--remote-url",dest="remote_url",default=REMOTE_URL,help="gsiftp url of the remote endpoint")
     p.add_argument("--local-url",dest="local_url",default=LOCAL_URL,help="gsiftp url of the remote endpoint")
     p.add_argument("--remote-dir",dest="remote_dir",default=REMOTE_DIR,help="remote directory data is pulled from")
+    p.add_argument("--remote-list",dest="remote_list",default=REMOTE_LIST,help="remote file list instead to guc --list")
     p.add_argument("--trans-dir",dest="trans_dir",default=TRANSFER_DIR,help="local directory to store data")
     p.add_argument("--trans-status",dest="trans_status",default=TRANSFER_STATUS_DIR,help="directory to store status of tranfers")
     p.add_argument("--file-type",dest="ftype",default=FTYPE,help="file extention of data files to be transfered")
     p.add_argument("--marker-type",dest="mtype",default=MRKTYPE,help="file extention of the marker file to be transfered")
+    p.add_argument("--state-file",dest="state_file",default=STATE_FILE,help="file for external triggers: hold ")
+    p.add_argument("--time-to-notify",dest="time_to_notify",default=TIME_TO_NOTIFY,help="how frequent to email notice")
+    p.add_argument("--email-addr",dest="email_addr",default=EMAIL_ADDR,help="destination for email notices")
+
     p.add_argument("--copy-done",dest="copy_done_to_remote",action="store_true", default=False,help="Allows on to copy done file to the remote site")
     p.add_argument("--config-file",dest="config_file",default="None",help="override any configs via a json config file")
 

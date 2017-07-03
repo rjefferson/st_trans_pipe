@@ -7,7 +7,9 @@ import math, os, pprint, re, shlex, shutil, socket, stat, time
 from datetime import datetime
 from signal import alarm, signal, SIGALRM, SIGKILL, SIGTERM
 from subprocess import Popen, PIPE, STDOUT
-
+import smtplib
+from email.mime.text import MIMEText
+import getpass
 
 class commException(Exception):
     def __init__(self, command, status, output):
@@ -153,4 +155,19 @@ class process_commands:
         self.log("status: %d" % (status), 3)
         self.log("output: %s" % output, 3)
         return (status, output, elapsed)
+
+    def sendmail(self,subject,msg,dest):
+
+        me = "@".join([getpass.getuser(),"nersc.gov"])
+        emsg = MIMEText(msg)
+        emsg['Subject'] = subject
+        emsg['From'] = me
+        emsg['To'] = dest
+        s=smtplib.SMTP('localhost')
+        s.sendmail(me,dest,emsg.as_string())
+        s.quit()
+
+
+
+
 
